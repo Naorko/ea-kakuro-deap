@@ -1,17 +1,21 @@
 # conda create --name deap-env python deap pandas tqdm matplotlib -c conda-forge
-
+import sys
 from datetime import datetime
 
 import numpy
 from deap import base, creator, tools
 import random
+from matplotlib import pyplot as plt
+import seaborn as sns
 
 # board configuration
-rows_size = [3, 4, 2, 2, 4, 3]
-perm_hor_sum = [16, 20, 6, 16, 19, 22]
-perm_ver_sum = [4, 33, 3, 16, 35, 8]
-cols_idxs = [[(2, 0), (4, 0)], [(0, 0), (1, 0), (2, 1), (4, 1), (5, 0)], [(0, 1), (1, 1)], [(4, 2), (5, 1)],
-             [(0, 2), (1, 2), (3, 0), (4, 3), (5, 2)], [(1, 3), (3, 1)]]
+from boardTranslator import BOARDS, get_board_parms_by_idx
+
+# rows_size = [3, 4, 2, 2, 4, 3]
+# rows_sum = [16, 20, 6, 16, 19, 22]
+# cols_sum = [4, 33, 3, 16, 35, 8]
+# cols_map = [[(2, 0), (4, 0)], [(0, 0), (1, 0), (2, 1), (4, 1), (5, 0)], [(0, 1), (1, 1)], [(4, 2), (5, 1)],
+#             [(0, 2), (1, 2), (3, 0), (4, 3), (5, 2)], [(1, 3), (3, 1)]]
 
 # rows_size = [2, 3, 2,
 #              8, 2,
@@ -29,7 +33,7 @@ cols_idxs = [[(2, 0), (4, 0)], [(0, 0), (1, 0), (2, 1), (4, 1), (5, 0)], [(0, 1)
 #              3, 2, 3,
 #              2, 8,
 #              2, 3, 2]
-# perm_hor_sum = [16, 14, 6,
+# rows_sum = [16, 14, 6,
 #                 39, 12,
 #                 10, 13, 24,
 #                 13, 13, 11,
@@ -45,7 +49,7 @@ cols_idxs = [[(2, 0), (4, 0)], [(0, 0), (1, 0), (2, 1), (4, 1), (5, 0)], [(0, 1)
 #                 21, 8, 18,
 #                 11, 43,
 #                 17, 24, 15]
-# perm_ver_sum = []
+# cols_sum = []
 
 allele_min_range = 1
 allele_max_range = 10
@@ -83,14 +87,14 @@ def init_evaluator(rows_weight=0.33, cols_weight=0.33, cols_dup_weight=0.34):
         # rows penalty
         for row_i, row_size in enumerate(rows_size):
             ind_row_sum = sum(ind[row_i])
-            row_penalty = abs(ind_row_sum - perm_hor_sum[row_i])
+            row_penalty = abs(ind_row_sum - rows_sum[row_i])
             rows_penalty += row_penalty
 
         # cols penalty
-        cols = [[ind[row_i][cell_i] for row_i, cell_i in col_idx] for col_idx in cols_idxs]
+        cols = [[ind[row_i][cell_i] for row_i, cell_i in col_idx] for col_idx in cols_map]
         for col_i, col_vals in enumerate(cols):
             ind_col_sum = sum(col_vals)
-            col_penalty = abs(ind_col_sum - perm_ver_sum[col_i])
+            col_penalty = abs(ind_col_sum - cols_sum[col_i])
             cols_penalty += col_penalty
 
             num_occurrences = [0] * 9
@@ -148,11 +152,11 @@ def init_statistics():
     stats.register("median", numpy.median)
 
 
-def init_GA():
+def init_GA(rows_weight=0.33, cols_weight=0.33, cols_dup_weight=0.34):
     init_individual()
     init_population()
     init_selections()
-    init_evaluator()
+    init_evaluator(rows_weight, cols_weight, cols_dup_weight)
     init_crossovers()
     init_mutations()
     init_statistics()
@@ -226,9 +230,44 @@ def run_GA(pop_size, gen_num=100, cross_pb=0.7, mutation_pb=0.3, verbose=False):
     return pop, logbook, times
 
 
+def generate_plot(logbook, board_num, run_num):
+    # extract statistics:
+    maxFitnessValues, meanFitnessValues, minFitnessValues, medianFitnessValues = logbook.select("max", "avg", "min",
+                                                                                                "median")
+
+    # plot statistics:
+    sns.set_style("whitegrid")
+    plt.plot(maxFitnessValues, color='red', label="Worst Fitness")
+    plt.plot(meanFitnessValues, color='green', label="Mean Fitness")
+    plt.plot(minFitnessValues, color='blue', label="Best Fitness")
+    plt.plot(medianFitnessValues, color='orange', label="Avg. Fitness")
+    plt.xlabel('Generations')
+    plt.ylabel('Fitness (Minimum problem)')
+    plt.title('Fitness as a function of generations')
+    plt.legend(loc='upper right')
+    plt.savefig(f"Run-{board_num}-{run_num}.png")
+    plt.close()
+
+
 # Main
 if __name__ == '__main__':
-    pop_size = 100
-    init_GA()
+    expr_num = sys.argv[1]
+    exprs = [(pop_size, gen_num, mutation_pb, cross_pb, rows_weight, cols_weight, cols_dup_weight)
+             for pop_size in numpy.arange(100, 301, 100)
+             for gen_num in numpy.arange(500, 1001, 250)
+             for mutation_pb in numpy.arange(0.3, 0.8, 0.2)
+             for cross_pb in numpy.arange(0.3, 0.8, 0.2)
+             for rows_weight in [0.33, 0.34, 0.33]
+             for cols_weight in [0.33, 0.33, 0.34]
+             for cols_dup_weight in [0.34, 0.33, 0.33]
+             ]
 
-    population, logbook, times = run_GA(pop_size, gen_num=500, verbose=True, mutation_pb=0.6)
+    pop_size, gen_num, mutation_pb, cross_pb, rows_weight, cols_weight, cols_dup_weight = exprs[int(expr_num)]
+    for board_num in range(len(BOARDS)):
+        rows_size, rows_sum, cols_sum, cols_map = get_board_parms_by_idx(board_num)
+        for run_num in range(3):
+            init_GA(rows_weight, cols_weight, cols_dup_weight)
+
+            population, logbook, times = run_GA(pop_size=pop_size, gen_num=gen_num, verbose=True, mutation_pb=0.6,
+                                                cross_pb=cross_pb)
+            generate_plot(logbook, board_num, run_num)
