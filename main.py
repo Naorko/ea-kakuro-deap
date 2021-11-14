@@ -1,58 +1,18 @@
 # conda create --name deap-env python deap pandas tqdm matplotlib -c conda-forge
 import os
+import random
 import sys
 from datetime import datetime
 
-import numpy
-from deap import base, creator, tools
-import random
-from matplotlib import pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
-
+from deap import base, creator, tools
+from matplotlib import pyplot as plt
 # board configuration
 from numpy.core import mean
 
 from boardTranslator import BOARDS, get_board_parms_by_idx
-
-# rows_size = [3, 4, 2, 2, 4, 3]
-# rows_sum = [16, 20, 6, 16, 19, 22]
-# cols_sum = [4, 33, 3, 16, 35, 8]
-# cols_map = [[(2, 0), (4, 0)], [(0, 0), (1, 0), (2, 1), (4, 1), (5, 0)], [(0, 1), (1, 1)], [(4, 2), (5, 1)],
-#             [(0, 2), (1, 2), (3, 0), (4, 3), (5, 2)], [(1, 3), (3, 1)]]
-
-# rows_size = [2, 3, 2,
-#              8, 2,
-#              3, 2, 3,
-#              2, 2, 4,
-#              2, 2, 2, 2,
-#              2, 4, 2,
-#              2, 2, 2,
-#              2, 2, 5,
-#              5, 2, 2,
-#              2, 2, 2,
-#              2, 4, 2,
-#              2, 2, 2, 2,
-#              4, 2, 2,
-#              3, 2, 3,
-#              2, 8,
-#              2, 3, 2]
-# rows_sum = [16, 14, 6,
-#                 39, 12,
-#                 10, 13, 24,
-#                 13, 13, 11,
-#                 17, 14, 3, 9,
-#                 12, 17, 12,
-#                 3, 14, 6,
-#                 7, 3, 34,
-#                 34, 5, 17,
-#                 15, 8, 4,
-#                 4, 18, 15,
-#                 11, 5, 17, 13,
-#                 21, 13, 16,
-#                 21, 8, 18,
-#                 11, 43,
-#                 17, 24, 15]
-# cols_sum = []
 
 allele_min_range = 1
 allele_max_range = 10
@@ -112,8 +72,9 @@ def init_evaluator(rows_weight=0.33, cols_weight=0.33, cols_dup_weight=0.34):
     toolbox.register("evaluate", eval_fitness)
 
 
-def init_crossovers():
-    toolbox.register("mate", tools.cxOnePoint)
+def init_crossovers(switch_prob=0.5):
+    # toolbox.register("mate", tools.cxOnePoint)
+    toolbox.register("mate", tools.cxUniform, indpb=switch_prob)
 
 
 def init_mutations(shuffle_bit_prob=0.05, replace_prob=0.5):
@@ -150,24 +111,26 @@ def init_selections(tournsize=3):
 def init_statistics():
     global stats
     stats = tools.Statistics(lambda ind: ind.fitness.values)
-    stats.register("avg", numpy.mean)
-    stats.register("std", numpy.std)
-    stats.register("min", numpy.min)
-    stats.register("max", numpy.max)
-    stats.register("median", numpy.median)
+    stats.register("avg", np.mean)
+    stats.register("std", np.std)
+    stats.register("min", np.min)
+    stats.register("max", np.max)
+    stats.register("median", np.median)
 
 
-def init_GA(replace_prob=0.5):
+def init_GA(toursize=3, rows_weight=0.33, cols_weight=0.33, cols_dup_weight=0.34, switch_prob=0.5,
+            shuffle_bit_prob=0.05,
+            replace_prob=0.5):
     init_individual()
     init_population()
-    init_selections()
-    init_evaluator()
-    init_crossovers()
-    init_mutations(replace_prob=replace_prob)
+    init_selections(toursize)
+    init_evaluator(rows_weight, cols_weight, cols_dup_weight)
+    init_crossovers(switch_prob)
+    init_mutations(shuffle_bit_prob, replace_prob)
     init_statistics()
 
 
-def create_offsprings(parents, cross_pb, mutation_pb, dir_expr_path, run_num, to_dump = False):
+def create_offsprings(parents, cross_pb, mutation_pb, dir_expr_path, run_num, to_dump=False):
     offsprings = [toolbox.clone(indi) for indi in parents]
     random.shuffle(offsprings)
 
@@ -185,8 +148,8 @@ def create_offsprings(parents, cross_pb, mutation_pb, dir_expr_path, run_num, to
         best_fitness_parents = min(fitness_values_parents)
         avg_fitness_offsprings_after_cross = mean(fitness_offsprings_after_cross)
         avg_fitness_parents = mean(fitness_values_parents)
-        dump_population_before_after(best_fitness_parents, avg_fitness_parents, best_fitness_offsprings_after_cross, avg_fitness_offsprings_after_cross, dir_expr_path, run_num, 'cross-over')
-
+        dump_population_before_after(best_fitness_parents, avg_fitness_parents, best_fitness_offsprings_after_cross,
+                                     avg_fitness_offsprings_after_cross, dir_expr_path, run_num, 'cross-over')
 
     # Mutation
     for i in range(len(offsprings)):
@@ -199,16 +162,20 @@ def create_offsprings(parents, cross_pb, mutation_pb, dir_expr_path, run_num, to
         fitness_offsprings_after_mutation = [ind.fitness.values for ind in offsprings]
         best_fitness_offsprings_after_mutation = min(fitness_offsprings_after_mutation)
         avg_fitness_offsprings_after_mutation = mean(fitness_offsprings_after_mutation)
-        dump_population_before_after(best_fitness_offsprings_after_cross, avg_fitness_offsprings_after_cross, best_fitness_offsprings_after_mutation, avg_fitness_offsprings_after_mutation, dir_expr_path, run_num, 'mutation')
+        dump_population_before_after(best_fitness_offsprings_after_cross, avg_fitness_offsprings_after_cross,
+                                     best_fitness_offsprings_after_mutation, avg_fitness_offsprings_after_mutation,
+                                     dir_expr_path, run_num, 'mutation')
 
     return offsprings
 
-def dump_population_before_after(best_fitness_before, avg_fitness_before,best_fitness_after,avg_fitness_after, dir_expr_path, run_num, type):
+
+def dump_population_before_after(best_fitness_before, avg_fitness_before, best_fitness_after, avg_fitness_after,
+                                 dir_expr_path, run_num, type):
     with open(f"{dir_expr_path}/run-{run_num}_{type}.txt", 'a') as file:
-        headers_to_write = ["before: \t\t\t\t\t after:\n"]
-        mean_best_to_write = [f"best_fitness_before(min): {float(best_fitness_before[0]):.2f} ~~ mean_fitness_before: {avg_fitness_before:.2f}\t"
-                              f" best_fitness_after(min): {float(best_fitness_after[0]):.2f} ~~ mean_fitness_after: {avg_fitness_after:.2f}\n"]
-        file.writelines(headers_to_write + mean_best_to_write)
+        mean_best_to_write = [
+            f"best_before(min): {float(best_fitness_before[0]):.2f} ~~ mean_before: {avg_fitness_before:.2f}\t"
+            f" best_after(min): {float(best_fitness_after[0]):.2f} ~~ mean_after: {avg_fitness_after:.2f}\n"]
+        file.writelines(mean_best_to_write)
 
 
 def evaluate_fitness(population):
@@ -239,7 +206,7 @@ def run_GA(pop_size, gen_num=100, cross_pb=0.7, mutation_pb=0.3, verbose=False, 
     pop = toolbox.population(n=pop_size)
 
     evaluate_population(pop, 0)
-
+    best_fitness = -1
     # Start Generational Loop
     for gen in range(1, gen_num + 1):
         # Record Generation Time
@@ -260,60 +227,71 @@ def run_GA(pop_size, gen_num=100, cross_pb=0.7, mutation_pb=0.3, verbose=False, 
 
         fitness_values = [ind.fitness.values for ind in pop]
         best_fitness = min(fitness_values)
-        if gen % gen_num * 10 // 100 == 0 or gen == gen_num:
+        if gen % (gen_num // 10) == 0 or gen == gen_num:
             dump_population(gen, pop, best_fitness, fitness_values, dir_expr_path, run_num)
 
-    return pop, logbook, times
+    return pop, logbook, times, best_fitness
 
 
 def dump_population(gen, pop, best_fitness, fitness_values, dir_expr_path, run_num):
     with open(f"{dir_expr_path}/run-{run_num}_gen-{gen}.txt", 'a') as file:
         gen_to_write = [f"gen: {gen}\n", f"best_fitness(min): {float(best_fitness[0]):.2f}\n"]
-        ind_to_write = [f"\tfitness-{float(fit[0]):.2f} ~~ individual: {str(ind)}\n" for ind, fit in zip(pop, fitness_values)]
+        ind_to_write = [f"\tfitness-{float(fit[0]):.2f} ~~ individual: {str(ind)}\n" for ind, fit in
+                        zip(pop, fitness_values)]
         file.writelines(gen_to_write + ind_to_write)
 
 
-def generate_plot(logbook, dir_expr_path,board_num, run_num):
-
+def generate_plot(logbook, dir_expr_path, board_num, run_num):
     maxFitnessValues, meanFitnessValues, minFitnessValues, medianFitnessValues, stdFitnessValues = logbook.select("max",
                                                                                                                   "avg",
                                                                                                                   "min",
                                                                                                                   "median",
-                                                                                                               "std")
-
+                                                                                                                  "std")
 
     sns.set_style("whitegrid")
     plt.plot(maxFitnessValues, color='red', label="Worst Fitness")
     plt.plot(meanFitnessValues, color='green', label="Mean Fitness")
     plt.plot(minFitnessValues, color='blue', label="Best Fitness")
-    plt.plot(medianFitnessValues, color='orange', label="Avg. Fitness")
-    plt.plot(stdFitnessValues, color='purple', label="Std. Fitness")
+    plt.plot(medianFitnessValues, color='orange', label="Median Fitness")
+    plt.plot(stdFitnessValues, color='purple', label="Std Fitness")
     plt.xlabel('Generations')
     plt.ylabel('Fitness (Minimum problem)')
     plt.title('Fitness as a function of generations')
     plt.legend(loc='upper right')
-    plt.savefig(f"{dir_expr_path}/Run-{board_num}-{run_num}.png")
+    plt.savefig(f"{dir_expr_path}/Run-{run_num}.png")
     plt.close()
 
 
 # Main
 if __name__ == '__main__':
     expr_num = sys.argv[1]
-    exprs = [(pop_size, gen_num, mutation_pb, cross_pb, replace_pb)
-             for pop_size in numpy.arange(100, 501, 100)
+    exprs = [(pop_size, gen_num, mutation_pb, cross_pb, tour_size, switch_pb, shuffle_bit_pb, replace_pb)
+             for pop_size in np.arange(100, 501, 100)
              for gen_num in [500]
-             for mutation_pb in numpy.arange(0.3, 0.8, 0.2)
-             for cross_pb in numpy.arange(0.3, 0.8, 0.2)
-             for replace_pb in numpy.arange(0.3,0.8,0.2)
+             for mutation_pb in np.arange(0.3, 0.8, 0.2)
+             for cross_pb in np.arange(0.3, 0.8, 0.2)
+             for tour_size in [3, 5, 8]
+             for switch_pb in np.arange(0.3, 0.8, 0.2)
+             for shuffle_bit_pb in np.arange(0.15, 0.55, 0.2)
+             for replace_pb in np.arange(0.3, 0.8, 0.2)
              ]
 
-    pop_size, gen_num, mutation_pb, cross_pb, replace_pb = exprs[int(expr_num)]
+    pop_size, gen_num, mutation_pb, cross_pb, tour_size, switch_pb, shuffle_bit_pb, replace_pb = exprs[int(expr_num)]
+    results = {}
     for board_num in range(len(BOARDS)):
-        dir_expr_path = f"./expr-{expr_num}/board-{board_num}"
+        dir_expr_path = f"./exprs/expr-{expr_num}/board-{board_num}"
         os.makedirs(dir_expr_path, exist_ok=True)
         rows_size, rows_sum, cols_sum, cols_map = get_board_parms_by_idx(board_num)
-        init_GA(replace_pb)
+        init_GA(toursize=tour_size, switch_prob=switch_pb, shuffle_bit_prob=shuffle_bit_pb, replace_prob=replace_pb)
+        best_fitnesses = []
         for run_num in range(3):
-            population, logbook, times = run_GA(pop_size=pop_size, gen_num=gen_num, verbose=True, mutation_pb=mutation_pb,
-                                                cross_pb=cross_pb, dir_expr_path=dir_expr_path, run_num=run_num)
+            population, logbook, times, best_fitness = run_GA(pop_size=pop_size, gen_num=gen_num, verbose=True,
+                                                              mutation_pb=mutation_pb,
+                                                              cross_pb=cross_pb, dir_expr_path=dir_expr_path,
+                                                              run_num=run_num)
+            best_fitnesses.append(best_fitness)
             generate_plot(logbook, dir_expr_path, board_num, run_num)
+
+        results[f'Board {board_num}'] = [mean(best_fitnesses)]
+
+    pd.DataFrame(results).to_csv(f"./exprs/expr-{expr_num}/results.csv", index=False)

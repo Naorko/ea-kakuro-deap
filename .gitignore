@@ -1,4 +1,5 @@
 .idea/
+exprs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
