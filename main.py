@@ -2,6 +2,7 @@
 import os
 import random
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import numpy as np
@@ -22,16 +23,27 @@ creator.create("Individual", list, fitness=creator.FitnessMin)
 
 toolbox = base.Toolbox()
 stats = None
+executor = ThreadPoolExecutor()
+toolbox.register("map", executor.map)
 
 
-def init_individual():
+def get_row_perm(row_opt):
+    row = list(random.choice(row_opt))
+    random.shuffle(row)
+    return row
+
+
+def init_individual(opt_flag):
     rows_perm = []
     for row_i, row_size in enumerate(rows_size):
-        toolbox.register(f'row{row_i}', random.sample, range(allele_min_range, allele_max_range), row_size)
+        if opt_flag:
+            toolbox.register(f'row{row_i}', get_row_perm, rows_opt[row_i])
+        else:
+            toolbox.register(f'row{row_i}', random.sample, range(1, 10), row_size)
         rows_perm.append(eval(f'toolbox.row{row_i}'))
 
     toolbox.register("individual", tools.initCycle, creator.Individual,
-                     rows_perm, n=len(rows_perm))
+                     rows_perm, n=1)
 
 
 def init_population():
@@ -77,7 +89,7 @@ def init_crossovers(switch_prob=0.5):
     toolbox.register("mate", tools.cxUniform, indpb=switch_prob)
 
 
-def init_mutations(shuffle_bit_prob=0.05, replace_prob=0.5):
+def init_mutations(shuffle_bit_prob=0.3, replace_prob=0.5, opt_flag=True):
     def shuffle_mutation(individual, indpb):
         mutated_ind = random.randrange(0, len(individual))
         new_indi = toolbox.clone(individual)
@@ -85,14 +97,19 @@ def init_mutations(shuffle_bit_prob=0.05, replace_prob=0.5):
         return new_indi
 
     def replace_mutation(individual):
-        mutated_row_ind = random.randrange(0, len(individual))
-        mutated_row = individual[mutated_row_ind]
-        mutated_ind = random.randrange(0, len(mutated_row))
-        num_to_choice = list(set(range(1, 10)) - set(mutated_row))
-        num_to_insert = random.choice(num_to_choice)
-
         new_indi = toolbox.clone(individual)
-        new_indi[mutated_row_ind][mutated_ind] = num_to_insert
+        if opt_flag:
+            for i in range(len(new_indi)):
+                if random.random() < 0.1:
+                    new_indi[i] = get_row_perm(rows_opt[i])
+        else:
+            mutated_row_ind = random.randrange(0, len(new_indi))
+            mutated_row = new_indi[mutated_row_ind]
+            mutated_ind = random.randrange(0, len(mutated_row))
+            num_to_choice = list(set(range(1, 10)) - set(mutated_row))
+            num_to_insert = random.choice(num_to_choice)
+            new_indi[mutated_row_ind][mutated_ind] = num_to_insert
+
         return new_indi
 
     def mutation(individual):
@@ -119,14 +136,16 @@ def init_statistics():
 
 
 def init_GA(toursize=3, rows_weight=0.33, cols_weight=0.33, cols_dup_weight=0.34, switch_prob=0.5,
-            shuffle_bit_prob=0.05,
-            replace_prob=0.5):
-    init_individual()
+            shuffle_bit_prob=0.5,
+            replace_prob=0.5, opt_flag=True):
+    if opt_flag:
+        rows_weight, cols_weight, cols_dup_weight = 0, 0.7, 0.3
+    init_individual(opt_flag=opt_flag)
     init_population()
     init_selections(toursize)
-    init_evaluator(rows_weight, cols_weight, cols_dup_weight)
+    init_evaluator(rows_weight=rows_weight, cols_weight=cols_weight, cols_dup_weight=cols_dup_weight)
     init_crossovers(switch_prob)
-    init_mutations(shuffle_bit_prob, replace_prob)
+    init_mutations(shuffle_bit_prob, replace_prob, opt_flag)
     init_statistics()
 
 
@@ -264,34 +283,37 @@ def generate_plot(logbook, dir_expr_path, board_num, run_num):
 
 # Main
 if __name__ == '__main__':
-    expr_num = sys.argv[1]
-    exprs = [(pop_size, gen_num, mutation_pb, cross_pb, tour_size, switch_pb, shuffle_bit_pb, replace_pb)
+    expr_num = int(sys.argv[1])
+    opt_flag = (expr_num // 10) == 1
+    board_num = expr_num % 10
+    expr_str = 'with-opt' if opt_flag else 'no-opt'
+    exprs = [(pop_size, gen_num, mutation_pb, cross_pb, tour_size)
              for pop_size in np.arange(100, 501, 100)
              for gen_num in [500]
              for mutation_pb in np.arange(0.3, 0.8, 0.2)
              for cross_pb in np.arange(0.3, 0.8, 0.2)
              for tour_size in [3, 5, 8]
-             for switch_pb in np.arange(0.3, 0.8, 0.2)
-             for shuffle_bit_pb in np.arange(0.15, 0.55, 0.2)
-             for replace_pb in np.arange(0.3, 0.8, 0.2)
+             # for switch_pb in np.arange(0.3, 0.8, 0.2)
+             # for shuffle_bit_pb in np.arange(0.15, 0.55, 0.2)
+             # for replace_pb in np.arange(0.3, 0.8, 0.2)
              ]
 
-    pop_size, gen_num, mutation_pb, cross_pb, tour_size, switch_pb, shuffle_bit_pb, replace_pb = exprs[int(expr_num)]
-    results = {}
-    for board_num in range(len(BOARDS)):
-        dir_expr_path = f"./exprs/expr-{expr_num}/board-{board_num}"
-        os.makedirs(dir_expr_path, exist_ok=True)
-        rows_size, rows_sum, cols_sum, cols_map = get_board_parms_by_idx(board_num)
-        init_GA(toursize=tour_size, switch_prob=switch_pb, shuffle_bit_prob=shuffle_bit_pb, replace_prob=replace_pb)
-        best_fitnesses = []
-        for run_num in range(3):
-            population, logbook, times, best_fitness = run_GA(pop_size=pop_size, gen_num=gen_num, verbose=True,
-                                                              mutation_pb=mutation_pb,
-                                                              cross_pb=cross_pb, dir_expr_path=dir_expr_path,
-                                                              run_num=run_num)
-            best_fitnesses.append(best_fitness)
-            generate_plot(logbook, dir_expr_path, board_num, run_num)
+    pop_size, gen_num, mutation_pb, cross_pb, tour_size = exprs[130]
+    # results = {}
+    # for board_num in range(len(BOARDS)):
+    dir_expr_path = f"./exprs_optflag/expr-{expr_str}/board-{board_num}"
+    os.makedirs(dir_expr_path, exist_ok=True)
+    rows_size, rows_sum, rows_opt, cols_sum, cols_map = get_board_parms_by_idx(board_num)
+    init_GA(toursize=tour_size, opt_flag=opt_flag)
+    best_fitnesses = []
+    for run_num in range(3):
+        population, logbook, times, best_fitness = run_GA(pop_size=pop_size, gen_num=gen_num, verbose=True,
+                                                          mutation_pb=mutation_pb,
+                                                          cross_pb=cross_pb, dir_expr_path=dir_expr_path,
+                                                          run_num=run_num)
+        best_fitnesses.append(best_fitness)
+        generate_plot(logbook, dir_expr_path, board_num, run_num)
 
-        results[f'Board {board_num}'] = [mean(best_fitnesses)]
+        # results[f'Board {board_num}'] = [mean(best_fitnesses)]
 
-    pd.DataFrame(results).to_csv(f"./exprs/expr-{expr_num}/results.csv", index=False)
+    # pd.DataFrame(results).to_csv(f"./exprs_optflag/expr-{expr_num}/results.csv", index=False)
